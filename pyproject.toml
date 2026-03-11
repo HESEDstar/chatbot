@@ -1,0 +1,30 @@
+[project]
+name = "hesedbot"
+version = "0.1.0"
+description = "Chatbot for Hesed Edusuite Platform"
+authors = [
+    {name = "BetikuOluwatobi",email = "anthonytobynho@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10,<4.0.0"
+dependencies = [
+    "flask (>=3.1.2,<4.0.0)",
+    "flask-restful (>=0.3.10,<0.4.0)",
+    "pydantic (>=2.12.5,<3.0.0)",
+    "redis (>=7.1.0,<8.0.0)",
+    "python-dotenv (>=1.2.1,<2.0.0)",
+    "openai (>=2.15.0,<3.0.0)",
+    "gunicorn (>=23.0.0,<24.0.0)",
+    "langchain (>=1.2.6,<2.0.0)",
+    "langgraph (>=1.0.7,<2.0.0)",
+    "langchain-openai (>=1.1.7,<2.0.0)",
+    "markdown (>=3.10.2,<4.0.0)",
+    "weasyprint (>=68.1,<69.0)"
+]
+
+[tool.poetry]
+packages = [{include = "hesedbot", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
