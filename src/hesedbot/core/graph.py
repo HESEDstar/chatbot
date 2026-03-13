@@ -1,6 +1,7 @@
+import random
 from typing import Literal
 from langgraph.graph import StateGraph, END
-from hesedbot.core.state import AgentState
+from hesedbot.core.state import AgentState, UserInformation
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, ToolMessage, AIMessage, HumanMessage
@@ -16,6 +17,9 @@ import uuid
 
 # Setup LLM (DeepSeek via OpenAI client)
 llm = ChatOpenAI(model="deepseek-chat", api_key=Config.OPENAI_API_KEY, base_url=Config.DEEPSEEK_API_URL)
+# Bind the structured output to the LLM
+info_extractor = llm.with_structured_output(UserInformation)
+
 ALL_TOOLS = [generate_lead, escalate_issue, clear_conversation]
 # Create the standard ToolNode
 base_tool_node = ToolNode(ALL_TOOLS)
@@ -34,6 +38,74 @@ def get_platform_context(filepath: str) -> str:
         return "Platform context file not found."
 
 # Nodes
+def extract_info_node(state: AgentState):
+    """
+    This node extracts structured client information from the conversation history using the LLM.
+    The extracted information is then stored in the state for use in other nodes and tools.
+    """
+
+    if state.get("user_role", "anonymous") != "anonymous":
+        return {} 
+
+    # Check current state for existing data
+    current_name = state.get("lead_name")
+    current_role = state.get("lead_role")
+    current_school = state.get("lead_school_name")
+    current_email = state.get("lead_email")
+
+    # If we already have everything, do not make an LLM call!
+    if all([current_name, current_role, current_school, current_email]):
+        return {}
+    
+    messages = state["messages"][-2:]
+    # We pass the last two conversation messages to the LLM to extract client info.
+    extracted = info_extractor.invoke(messages)
+    
+    # Update the state with the extracted lead information
+    return {
+        "lead_name": extracted.lead_name or current_name,
+        "lead_role": extracted.lead_role or current_role,
+        "lead_school_name": extracted.lead_school_name or current_school,
+        "lead_email": extracted.lead_email or current_email
+    }
+
+def goodbye_node(state: AgentState):
+    """
+    Uses the LLM to generate a dynamic, contextual goodbye message 
+    after the lead has been successfully captured.
+    """
+    # Use fallbacks just in case the extraction was imperfect
+    lead_name = state.get('lead_name') or 'there'
+    school = state.get('lead_school_name') or 'your school'
+    
+    # A pool of varied, natural-sounding goodbye templates
+    goodbye_templates = [
+        f"Thanks {lead_name}! I've sent the demo access to your email. Our team will reach out soon to show you how Hesed can help {school}. Have a great day! 😊",
+        f"All set, {lead_name}! Your demo is in your inbox. We're excited to connect with {school} soon. Take care! 🚀",
+        f"Got it! I've emailed the details over, {lead_name}. Someone from our team will be in touch shortly to discuss {school}'s needs. Have a wonderful day!",
+        f"Awesome, {lead_name}. Check your email for the demo link! We'll follow up soon to give {school} a proper walkthrough. Talk soon! 👋",
+        f"Perfect! Demo access is on its way to your inbox, {lead_name}. We look forward to speaking with you and the team at {school}. Have a good one!"
+    ]
+
+    # Inject a final, strict system prompt to force a smooth wrap-up
+    wrap_up_instruction = SystemMessage(
+        content=(
+            f"SYSTEM COMMAND: The lead ({lead_name} from {school}) has been successfully captured in the database. "
+            f"Write a simple, warm, and highly personalized goodbye message(e.g {random.choice(goodbye_templates)}) confirming that their demo access has been sent to their email. "
+            "CRITICAL: Keep it under 15 words. reply with an absolute maximum of 5 words If the user says Thanks or Goodbye. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
+            )
+        )
+
+
+    # Pass the history plus the wrap-up command to the base LLM.
+
+    # We use 'llm' instead of 'llm_with_tools' here so it cannot accidentally trigger another tool.
+
+    messages = [wrap_up_instruction] + state["messages"][-2:] 
+
+    # Return the message to be added to the state
+    return {"messages": [llm.invoke(messages)]}
+
 def summarize_node(state: AgentState):
     """
     This node handles memory. 
@@ -43,23 +115,40 @@ def summarize_node(state: AgentState):
     
     # Only summarize if history is long enough
     if len(messages) > 15:
+
+        # Extract only the messages we are about to delete
+        messages_to_summarize = messages[:-5]
+        
+        # Strip all metadata, tool calls, and system messages
+        transcript = []
+        for m in messages_to_summarize:
+            if isinstance(m, HumanMessage):
+                transcript.append(f"User: {m.content}")
+            elif isinstance(m, AIMessage) and m.content: 
+                # Only grab text content. Ignore AIMessages that are just invisible tool calls.
+                transcript.append(f"Bot: {m.content}")
+
+        lean_transcript  = "\n".join(transcript)
         # Prompt to summarize
-        summary_prompt = "Summarize the preceding conversation concisely, focusing on key decisions."
+        system_instruction = (
+            "You are compressing chat history for an AI assistant's memory. "
+            "CRITICAL: Update the current summary with the new transcript, focus on key decisions, user intent, data provided, and resolved issues. Do not use conversational filler."
+        )
         # Current summary + messages to maintain continuity
         existing_summary = state.get("summary", "")
         summarize_prompt = PromptTemplate(
-            template="Current Summary: {existing_summary}\n\nNew Messages: {messages}\n\n{summary_prompt}\n\nSummary:",
-            input_variables=["messages", "existing_summary", "summary_prompt"]
+            template="{system_instruction}\n\nCURRENT SUMMARY: {existing_summary}\n\nNEW TRANSCRIPT TO MERGE:\n{lean_transcript}\n\nUPDATED SUMMARY:",
+            input_variables=["messages", "existing_summary", "system_instruction"]
         )
         chain = summarize_prompt | llm
         response = chain.invoke({
-            "messages": messages,
+            "messages": lean_transcript,
             "existing_summary": existing_summary,
-            "summary_prompt": summary_prompt
+            "system_instruction": system_instruction
         })
         
         # RemoveMessage instructions for all but the last 5 messages
-        delete_messages = [RemoveMessage(id=m.id) for m in messages[:-5] if m.id]
+        delete_messages = [RemoveMessage(id=m.id) for m in messages_to_summarize if m.id]
         
         return {
             "summary": response.content,
@@ -85,7 +174,7 @@ def escalate_node(state: AgentState):
         return {
             "escalate": False, # Clear the flag so it doesn't loop
             "messages": [
-                AIMessage(content="The human agent has relinquished control. I'm back! How can I further assist you?", name="HesedBot")
+                SystemMessage(content="A human agent has successfully resolved the user's portal issue. Resume standard assistance.", name="HesedBot"),
             ]
         }
 
@@ -96,10 +185,21 @@ def chatbot_node(state: AgentState):
     role = state.get("user_role", "anonymous")  # Default to 'anonymous' if not set
     path = sales_path if role == "anonymous" else sms_path
     platform_context = get_platform_context(path)  # Fetch real-time platform context
+    completed_data = {
+        "user_name": state.get('lead_name', 'N/A'), "role": state.get('lead_role', 'N/A'), 
+        "school_name": state.get('lead_school_name', 'N/A'), "email": state.get('lead_email', 'N/A')
+        }
 
     # Dynamic Prompting/Tooling: We determine the system prompt and accessible tools based on the user's role.
     if role == "anonymous":
-        system_content = SALES_REPRESENTATIVE_PROMPT.format(platform_context=platform_context)
+        missing_fields = [k for k, v in completed_data.items() if v == 'N/A']
+        if not missing_fields:
+            dynamic_instruction = "INFO COMPLETE: All lead data captured. use the 'generate_lead' tool."
+        else:
+            next_target = missing_fields[0].replace("_", " ")
+            dynamic_instruction = f"PROGRESS: You have {4 - len(missing_fields)}/4 details. Focus only on getting the {next_target} next. DO NOT ask for everything at once."
+        system_content = SALES_REPRESENTATIVE_PROMPT.format(platform_context=platform_context, **completed_data)
+        system_content += f"\n\n### CURRENT MISSION\n{dynamic_instruction}"
         tools = [generate_lead] # Anonymous users only get the generate_lead tool to connect them to a human sales rep. No AI tools.
         llm_with_tools = llm.bind_tools(tools)
     else:
@@ -164,30 +264,40 @@ def tool_node_with_rbac(state: AgentState):
     return {"messages": result_messages}
 
 # Router
-def router(state: AgentState) -> Literal["tools_node", "summarize"]:
+def router(state: AgentState) -> Literal["tools_node", "goodbye", "summarize"]:
     last_message = state["messages"][-1]
+
+    if state.get("lead_captured"):
+        return "goodbye"
+    
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tools_node"
     return "summarize"
 
-def escalation_router(state: AgentState) -> Literal["escalate_node", "chatbot_node"]:
+def escalation_router(state: AgentState) -> Literal["escalate_node", "goodbye", "chatbot_node"]:
     if state.get("escalate"):
         return "escalate_node"
+    if state.get("lead_captured"):
+        return "goodbye"
     return "chatbot_node"
 
 # Build Graph
 workflow = StateGraph(AgentState)
+workflow.add_node("extract_info", extract_info_node)
 workflow.add_node("summarize", summarize_node)
 workflow.add_node("chatbot", chatbot_node)
 workflow.add_node("tools_node", tool_node_with_rbac)
 workflow.add_node("escalate_node", escalate_node)
+workflow.add_node("goodbye", goodbye_node)
 
-workflow.set_entry_point("summarize")
+workflow.set_entry_point("extract_info")
+workflow.add_edge("extract_info", "summarize")
 workflow.add_edge("summarize", "chatbot")
 
-workflow.add_conditional_edges("chatbot",  router, {"tools_node": "tools_node","summarize": END})
-workflow.add_conditional_edges("tools_node", escalation_router, {"escalate_node": "escalate_node", "chatbot_node": "chatbot"})
+workflow.add_conditional_edges("chatbot",  router, {"tools_node": "tools_node", "goodbye": "goodbye", "summarize": END})
+workflow.add_conditional_edges("tools_node", escalation_router, {"escalate_node": "escalate_node", "goodbye": "goodbye", "chatbot_node": "chatbot"})
 workflow.add_edge("escalate_node", "chatbot") # After escalation, we loop back to the chatbot node to continue the conversation with the human agent's input.
+workflow.add_edge("goodbye", END)
 
 memory_saver = MemorySaver()
 app_graph = workflow.compile(checkpointer=memory_saver)
@@ -242,7 +352,7 @@ def run_interactive_chat():
             break
 
         # Update the state with the new user message
-        input_data: AgentState = {"messages": [HumanMessage(content=user_input)], "user_role": "student"} # For testing, we set the role value. In production, this would come from auth system.
+        input_data: AgentState = {"messages": [HumanMessage(content=user_input)], "user_role": "anonymous"} # For testing, we set the role value. In production, this would come from auth system.
         
         # Stream the graph execution
         # We use 'stream' so we can see which node is currently working
@@ -256,11 +366,12 @@ def run_interactive_chat():
                 if "messages" in state_update and state_update["messages"]:
                     last_message = state_update["messages"][-1]
                     if node == "chatbot":
-                        # Only print if it's an AI response to avoid clutter
+                        # If it's a regular chatbot response without tool calls, we print it as the bot's message.
                         if isinstance(last_message, AIMessage) and not last_message.tool_calls:
                             print(f"\nBot: {last_message.content}")
-                    elif hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                        print(f"\n[System]: Bot is calling tool: {last_message.tool_calls[0]['name']}")
+                        # The bot is initiating a tool call
+                        elif hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                            print(f"\n[System]: Bot is calling tool: {last_message.tool_calls[0]['name']}")
 
 if __name__ == "__main__":
     run_interactive_chat()

@@ -14,6 +14,13 @@ class LessonNoteInput(BaseModel):
     week: int = Field(description="Academic week number")
     term: str = Field(description="Academic term")
 
+# Schema to capture lead information for the generate_lead tool
+class LeadInput(BaseModel):
+    name: str = Field(description="The full name of the lead. required.")
+    role: str = Field(description="The role of the lead (e.g., 'teacher', 'principal'). required.")
+    email: str = Field(description="The email address of the lead. required.")
+    school_name: str = Field(description="The name of the school associated with the lead. required.")
+
 @tool(args_schema=LessonNoteInput)
 async def generate_lesson_note(
     subject: str, school_class: str, topic: str, duration: str, week: int, term: str, 
@@ -63,23 +70,29 @@ def escalate_issue(reason: str, runtime: ToolRuntime) -> Command:
         }
     )
 
-@tool
-def generate_lead(name: str, role: str, email: str, school_name: str) -> str:
+
+
+@tool(args_schema=LeadInput)
+def generate_lead(name: str, role: str, email: str, school_name: str, runtime: ToolRuntime) -> Command:
     """
     Upload lead information to the database.
-    Args:
-        name (str): The name of the lead.
-        role (str): The role of the lead (e.g., 'teacher', 'principal').
-        email (str): The email address of the lead.
-        school_name (str): The name of the school associated with the lead.
-    Returns:
-        str: A confirmation message indicating the lead was generated successfully. 
     """
     # This is a placeholder implementation. In a real application, this function would interact with a database or an external CRM system to store the lead information.
     # For demonstration purposes, we will just return a success message.
 
     # Lead generated successfully: Name: {name}, Role: {role}, Email: {email}, School: {school_name}
-    return f"Thanks {name}! I've sent the demo access to your email. Our team will reach out soon to schedule a quick walkthrough. Have a great day! 😊"    
+    return Command(
+        update={
+            "lead_captured": True,
+            "messages": [
+                ToolMessage(
+                    content="SYSTEM: Lead saved successfully. Proceed to say a final goodbye.",
+                    tool_name="generate_lead",
+                    tool_call_id=runtime.tool_call_id
+                )
+            ]
+        }
+    )    
 
 # Update the conversation history by removing all messages
 @tool
