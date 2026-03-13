@@ -18,7 +18,7 @@ import uuid
 # Setup LLM (DeepSeek via OpenAI client)
 llm = ChatOpenAI(model="deepseek-chat", api_key=Config.OPENAI_API_KEY, base_url=Config.DEEPSEEK_API_URL)
 # Bind the structured output to the LLM
-info_extractor = llm.with_structured_output(UserInformation)
+info_extractor = llm.with_structured_output(UserInformation, method="function_calling")
 
 ALL_TOOLS = [generate_lead, escalate_issue, clear_conversation]
 # Create the standard ToolNode
@@ -46,6 +46,11 @@ def extract_info_node(state: AgentState):
 
     if state.get("user_role", "anonymous") != "anonymous":
         return {} 
+    
+    messages = state["messages"]
+    # Skip if the last message isn't from the user
+    if not messages or not isinstance(messages[-1], HumanMessage):
+        return {"messages": []}
 
     # Check current state for existing data
     current_name = state.get("lead_name")
@@ -55,19 +60,23 @@ def extract_info_node(state: AgentState):
 
     # If we already have everything, do not make an LLM call!
     if all([current_name, current_role, current_school, current_email]):
-        return {}
+        return {"messages": []} # No updates needed
     
-    messages = state["messages"][-2:]
-    # We pass the last two conversation messages to the LLM to extract client info.
-    extracted = info_extractor.invoke(messages)
-    
-    # Update the state with the extracted lead information
-    return {
-        "lead_name": extracted.lead_name or current_name,
-        "lead_role": extracted.lead_role or current_role,
-        "lead_school_name": extracted.lead_school_name or current_school,
-        "lead_email": extracted.lead_email or current_email
-    }
+    try:
+        # pass the last two conversation messages to the LLM to extract client info.
+        extracted = info_extractor.invoke(messages[-2:])
+        
+        # Update the state with the extracted lead information
+        return {
+            "lead_name": extracted.lead_name or current_name,
+            "lead_role": extracted.lead_role or current_role,
+            "lead_school_name": extracted.lead_school_name or current_school,
+            "lead_email": extracted.lead_email or current_email
+        }
+    except Exception as e:
+        # If extraction fails, return the current state without updates.
+        print(f"\n[Extraction Warning]: {str(e)}")
+        return {"messages": []}
 
 def goodbye_node(state: AgentState):
     """
@@ -75,34 +84,28 @@ def goodbye_node(state: AgentState):
     after the lead has been successfully captured.
     """
     # Use fallbacks just in case the extraction was imperfect
-    lead_name = state.get('lead_name') or 'there'
-    school = state.get('lead_school_name') or 'your school'
+    lead_name = state.get('lead_name', 'there')
+    school = state.get('lead_school_name', 'your school')
     
     # A pool of varied, natural-sounding goodbye templates
-    goodbye_templates = [
-        f"Thanks {lead_name}! I've sent the demo access to your email. Our team will reach out soon to show you how Hesed can help {school}. Have a great day! 😊",
-        f"All set, {lead_name}! Your demo is in your inbox. We're excited to connect with {school} soon. Take care! 🚀",
-        f"Got it! I've emailed the details over, {lead_name}. Someone from our team will be in touch shortly to discuss {school}'s needs. Have a wonderful day!",
-        f"Awesome, {lead_name}. Check your email for the demo link! We'll follow up soon to give {school} a proper walkthrough. Talk soon! 👋",
-        f"Perfect! Demo access is on its way to your inbox, {lead_name}. We look forward to speaking with you and the team at {school}. Have a good one!"
-    ]
+    # goodbye_templates = [
+    #     f"Thanks {lead_name}! I've sent the demo access to your email. Our team will reach out soon to show you how Hesed can help {school}. Have a great day! 😊",
+    #     f"All set, {lead_name}! Your demo is in your inbox. We're excited to connect with {school} soon. Take care! 🚀",
+    #     f"Got it! I've emailed the details over, {lead_name}. Someone from our team will be in touch shortly to discuss {school}'s needs. Have a wonderful day!",
+    #     f"Awesome, {lead_name}. Check your email for the demo link! We'll follow up soon to give {school} a proper walkthrough. Talk soon! 👋",
+    #     f"Perfect! Demo access is on its way to your inbox, {lead_name}. We look forward to speaking with you and the team at {school}. Have a good one!"
+    # ]
 
     # Inject a final, strict system prompt to force a smooth wrap-up
     wrap_up_instruction = SystemMessage(
         content=(
             f"SYSTEM COMMAND: The lead ({lead_name} from {school}) has been successfully captured in the database. "
-            f"Write a simple, warm, and highly personalized goodbye message(e.g {random.choice(goodbye_templates)}) confirming that their demo access has been sent to their email. "
-            "CRITICAL: Keep it under 15 words. reply with an absolute maximum of 5 words If the user says Thanks or Goodbye. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
+            f"Write a simple, warm, and highly personalized goodbye message confirming that their demo access has been sent to their email. "
+            "CRITICAL: If the user asks additional questions after the lead is generated, answer them briefly and naturally, but gently remind them that the upcoming demo or their dedicated account manager will cover everything in detail. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
             )
         )
-
-
-    # Pass the history plus the wrap-up command to the base LLM.
-
-    # We use 'llm' instead of 'llm_with_tools' here so it cannot accidentally trigger another tool.
-
+    # We use 'llm' instead of 'llm_with_tools' here.
     messages = [wrap_up_instruction] + state["messages"][-2:] 
-
     # Return the message to be added to the state
     return {"messages": [llm.invoke(messages)]}
 
@@ -185,21 +188,17 @@ def chatbot_node(state: AgentState):
     role = state.get("user_role", "anonymous")  # Default to 'anonymous' if not set
     path = sales_path if role == "anonymous" else sms_path
     platform_context = get_platform_context(path)  # Fetch real-time platform context
-    completed_data = {
-        "user_name": state.get('lead_name', 'N/A'), "role": state.get('lead_role', 'N/A'), 
-        "school_name": state.get('lead_school_name', 'N/A'), "email": state.get('lead_email', 'N/A')
-        }
+    required_data = {
+        "Name": state.get('lead_name'), 
+        "Role": state.get('lead_role'), 
+        "School Name": state.get('lead_school_name'), 
+        "Email": state.get('lead_email')
+    }
 
     # Dynamic Prompting/Tooling: We determine the system prompt and accessible tools based on the user's role.
     if role == "anonymous":
-        missing_fields = [k for k, v in completed_data.items() if v == 'N/A']
-        if not missing_fields:
-            dynamic_instruction = "INFO COMPLETE: All lead data captured. use the 'generate_lead' tool."
-        else:
-            next_target = missing_fields[0].replace("_", " ")
-            dynamic_instruction = f"PROGRESS: You have {4 - len(missing_fields)}/4 details. Focus only on getting the {next_target} next. DO NOT ask for everything at once."
-        system_content = SALES_REPRESENTATIVE_PROMPT.format(platform_context=platform_context, **completed_data)
-        system_content += f"\n\n### CURRENT MISSION\n{dynamic_instruction}"
+        data_fields = [k for k, v in required_data.items() if v]
+        system_content = SALES_REPRESENTATIVE_PROMPT.format(platform_context=platform_context, user_information=", ".join(data_fields))
         tools = [generate_lead] # Anonymous users only get the generate_lead tool to connect them to a human sales rep. No AI tools.
         llm_with_tools = llm.bind_tools(tools)
     else:
@@ -263,12 +262,15 @@ def tool_node_with_rbac(state: AgentState):
     # If all RBAC checks pass, we return the result messages.
     return {"messages": result_messages}
 
-# Router
-def router(state: AgentState) -> Literal["tools_node", "goodbye", "summarize"]:
-    last_message = state["messages"][-1]
-
+# Routers
+def goodbye_router(state: AgentState) -> Literal["goodbye", "summarize"]:
+      
     if state.get("lead_captured"):
         return "goodbye"
+    return "summarize"
+
+def router(state: AgentState) -> Literal["tools_node", "summarize"]:
+    last_message = state["messages"][-1]
     
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tools_node"
@@ -291,10 +293,10 @@ workflow.add_node("escalate_node", escalate_node)
 workflow.add_node("goodbye", goodbye_node)
 
 workflow.set_entry_point("extract_info")
-workflow.add_edge("extract_info", "summarize")
+workflow.add_conditional_edges("extract_info", goodbye_router, {"goodbye": "goodbye", "summarize": "summarize"})
 workflow.add_edge("summarize", "chatbot")
 
-workflow.add_conditional_edges("chatbot",  router, {"tools_node": "tools_node", "goodbye": "goodbye", "summarize": END})
+workflow.add_conditional_edges("chatbot",  router, {"tools_node": "tools_node", "summarize": END})
 workflow.add_conditional_edges("tools_node", escalation_router, {"escalate_node": "escalate_node", "goodbye": "goodbye", "chatbot_node": "chatbot"})
 workflow.add_edge("escalate_node", "chatbot") # After escalation, we loop back to the chatbot node to continue the conversation with the human agent's input.
 workflow.add_edge("goodbye", END)
@@ -365,7 +367,7 @@ def run_interactive_chat():
             for node, state_update in event.items():
                 if "messages" in state_update and state_update["messages"]:
                     last_message = state_update["messages"][-1]
-                    if node == "chatbot":
+                    if node in ["chatbot", "goodbye"]:
                         # If it's a regular chatbot response without tool calls, we print it as the bot's message.
                         if isinstance(last_message, AIMessage) and not last_message.tool_calls:
                             print(f"\nBot: {last_message.content}")
