@@ -9,10 +9,10 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     
     # Context variables
-    user_id: NotRequired[Optional[str]]
+    # user_id: NotRequired[Optional[str]]
     summary: NotRequired[Optional[str]]
     user_role: str  # 'student', 'teacher', 'admin', 'anonymous'
-    session_id: NotRequired[Optional[str]]
+    # session_id: NotRequired[Optional[str]]
 
     # lead details for generate_lead tool   
     lead_name: NotRequired[Optional[str]]

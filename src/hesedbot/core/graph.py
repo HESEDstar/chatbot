@@ -170,18 +170,22 @@ def escalate_node(state: AgentState):
 
     # Pause the graph. The execution stops entirely here.
     # The string passed to interrupt() can be read by the frontend to know the graph state.
-    resume_action = interrupt("Chatbot paused. Waiting for human agent resolution.")
+    # resume_action = interrupt("Chatbot paused. Waiting for human agent resolution.")
 
     # Execution resumes ONLY when app_graph.invoke(Command(resume="approve")) is called.
-    if resume_action == "approve":
-        return {
-            "escalate": False, # Clear the flag so it doesn't loop
-            "messages": [
-                SystemMessage(content="A human agent has successfully resolved the user's portal issue. Resume standard assistance.", name="HesedBot"),
+    # if resume_action == "approve":
+    #     return {
+    #         "escalate": False, # Clear the flag so it doesn't loop
+    #         "messages": [
+    #             SystemMessage(content="A human agent has successfully resolved the user's portal issue. Resume standard assistance.", name="HesedBot"),
+    #         ]
+    #     }
+    return {
+        "escalate": False, # Clear the flag so it doesn't loop
+        "messages": [
+            SystemMessage(content="The complaint has been successfully logged to the support system. Resume standard assistance.", name="HesedBot")
             ]
-        }
-
-    return {"escalate": True, "messages": []} # Keep it escalated if not approved 
+            }
 
 def chatbot_node(state: AgentState):
     """Decides the next action based on history and system prompt."""
