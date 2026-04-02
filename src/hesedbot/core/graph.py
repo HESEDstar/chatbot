@@ -183,7 +183,7 @@ def escalate_node(state: AgentState):
     return {
         "escalate": False, # Clear the flag so it doesn't loop
         "messages": [
-            SystemMessage(content="The complaint has been successfully logged to the support system. Resume standard assistance.", name="HesedBot")
+            SystemMessage(content="The complaint has been successfully logged to the support system, someone will contact them soon. Resume standard assistance.", name="HesedBot")
             ]
             }
 
