@@ -5,7 +5,7 @@ from hesedbot.api.chat import app
 
 @pytest.fixture
 def client():
-    """Setup the Flask test client."""
+    """Setup the Flask test client"""
     app.config.update({
         "TESTING": True,
     })

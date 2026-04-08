@@ -3,7 +3,7 @@ import uuid
 import sys
 
 # Replace with the URL where the Flask app is running
-API_URL = "http://127.0.0.1:5000/chat"
+API_URL = "" #"http://127.0.0.1:5000/chat"
 
 def run_api_client():
     # Create a unique session ID for this chat
