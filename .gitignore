@@ -38,6 +38,8 @@ static/
 tmp/
 temp/
 *.tmp
+**/sales_context.txt
+**/sms_guide.txt
 
 # Testing
 coverage/
