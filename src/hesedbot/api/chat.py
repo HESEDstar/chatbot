@@ -40,10 +40,27 @@ def chat():
     try:
         # Use invoke() for a standard synchronous REST response. 
         final_state = app_graph.invoke(input_data, config)
+
+        if not isinstance(final_state, dict):
+            final_state = {}
+        
+        messages = final_state.get("messages", []) 
+        if not messages:
+            # Log a warning if the graph execution completed but did not return any messages
+            print("Warning: Graph execution completed but returned no messages.")
+            return jsonify({"error": "The assistant did not return a response."}), 500
         
         # Fetch the latest message to return to the frontend
-        last_message = final_state["messages"][-1].content
-        
+        if hasattr(messages[-1], 'content'):
+            last_message = messages[-1].content
+        else:
+            print("Warning: The last message does not have a 'content' attribute.")
+            last_message = str(messages[-1])  # Fallback to string representation
+
+        if not last_message:
+            print("Warning: The assistant returned an empty message content.")
+            return jsonify({"error": "The assistant returned an empty response."}), 500
+
         return jsonify({
             "status": "success",
             "message": last_message
