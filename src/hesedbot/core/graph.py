@@ -1,4 +1,4 @@
-import random
+from pathlib import Path
 from typing import Literal
 from langgraph.graph import StateGraph, END
 from hesedbot.core.state import AgentState, UserInformation
@@ -23,10 +23,12 @@ info_extractor = llm.with_structured_output(UserInformation, method="function_ca
 ALL_TOOLS = [generate_lead, escalate_issue, clear_conversation]
 # Create the standard ToolNode
 base_tool_node = ToolNode(ALL_TOOLS)
-sales_path = "src/hesedbot/services/sales_context.txt"
-sms_path = "src/hesedbot/services/sms_guide.txt"
+CURRENT_DIR = Path(__file__).resolve().parent
+BASE_DIR = CURRENT_DIR.parent
+sales_path = BASE_DIR / "services" / "sales_context.txt"
+sms_path = BASE_DIR / "services" / "sms_guide.txt"
 
-def get_platform_context(filepath: str) -> str:
+def get_platform_context(filepath: Path | str) -> str:
     """
     Simulates fetching real-time data from a database or a cache (Redis).
     In production, getting the context from DB for current pricing, features, or active modules is the best approach.
@@ -35,6 +37,7 @@ def get_platform_context(filepath: str) -> str:
         with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
+        print(f"[Error]: Context file not found at {filepath}")
         return "Platform context file not found."
 
 # Nodes
