@@ -32,4 +32,5 @@ class UserInformation(BaseModel):
     lead_role: str | None = Field(None, description="The lead's job title or role (e.g., Teacher, Principal).")
     lead_school_name: str | None = Field(None, description="The name of the school or organization.")
     lead_email: str | None = Field(None, description="The lead's email address.")
+    lead_pain_point: str | None = Field(None, description="The specific pain point the lead mentioned.")
     

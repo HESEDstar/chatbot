@@ -20,6 +20,7 @@ class LeadInput(BaseModel):
     role: str = Field(description="The role of the lead (e.g., 'teacher', 'principal'). required.")
     email: str = Field(description="The email address of the lead. required.")
     school_name: str = Field(description="The name of the school associated with the lead. required.")
+    pain_point: str = Field(description="The specific pain point or challenge the lead mentioned during the conversation. required.")
 
 @tool(args_schema=LessonNoteInput)
 async def generate_lesson_note(
@@ -73,14 +74,14 @@ def escalate_issue(reason: str, runtime: ToolRuntime) -> Command:
 
 
 @tool(args_schema=LeadInput)
-def generate_lead(name: str, role: str, email: str, school_name: str, runtime: ToolRuntime) -> Command:
+def generate_lead(name: str, role: str, email: str, school_name: str, pain_point: str, runtime: ToolRuntime) -> Command:
     """
-    Upload lead information to the database.
+    Alerts someone on the team to send the demo and upload lead information to the database.
     """
     # This is a placeholder implementation. In a real application, this function would interact with a database or an external CRM system to store the lead information.
     # For demonstration purposes, we will just return a success message.
 
-    # Lead generated successfully: Name: {name}, Role: {role}, Email: {email}, School: {school_name}
+    # Lead generated successfully: Name: {name}, Role: {role}, Email: {email}, School: {school_name}, Pain Point: {pain_point}
     return Command(
         update={
             "lead_captured": True,

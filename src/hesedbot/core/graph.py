@@ -60,9 +60,10 @@ def extract_info_node(state: AgentState):
     current_role = state.get("lead_role")
     current_school = state.get("lead_school_name")
     current_email = state.get("lead_email")
+    current_pain_point = state.get("lead_pain_point")
 
     # If we already have everything, do not make an LLM call!
-    if all([current_name, current_role, current_school, current_email]):
+    if all([current_name, current_role, current_school, current_email, current_pain_point]):
         return {"messages": []} # No updates needed
     
     try:
@@ -74,7 +75,8 @@ def extract_info_node(state: AgentState):
             "lead_name": extracted.lead_name or current_name,
             "lead_role": extracted.lead_role or current_role,
             "lead_school_name": extracted.lead_school_name or current_school,
-            "lead_email": extracted.lead_email or current_email
+            "lead_email": extracted.lead_email or current_email,
+            "lead_pain_point": extracted.lead_pain_point or current_pain_point
         }
     except Exception as e:
         # If extraction fails, return the current state without updates.
@@ -89,6 +91,7 @@ def goodbye_node(state: AgentState):
     # Use fallbacks just in case the extraction was imperfect
     lead_name = state.get('lead_name', 'there')
     school = state.get('lead_school_name', 'your school')
+    pain_point = state.get('lead_pain_point', 'your pain point')
     
     # A pool of varied, natural-sounding goodbye templates
     # goodbye_templates = [
@@ -102,9 +105,9 @@ def goodbye_node(state: AgentState):
     # Inject a final, strict system prompt to force a smooth wrap-up
     wrap_up_instruction = SystemMessage(
         content=(
-            f"SYSTEM COMMAND: The lead ({lead_name} from {school}) has been successfully captured in the database. "
-            f"Write a simple, warm, and highly personalized goodbye message confirming that their demo access has been sent to their email. "
-            "CRITICAL: If the user asks additional questions after the lead is generated, answer them briefly and naturally, but gently remind them that the upcoming demo or their dedicated account manager will cover everything in detail. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
+            f"SYSTEM COMMAND: You are a routing assistant for Hesed Edusuite. The lead ({lead_name} from {school}) has been successfully captured in the database. "
+            f"Write a simple, and highly personalized goodbye message confirming that someone from our team will be in touch shortly to discuss {school}'s needs and {pain_point}. Keep the final goodbye to a MAXIMUM of two sentences."
+            "CRITICAL: If the user asks additional questions after the lead is generated, answer them briefly and naturally, but gently remind them that their dedicated account manager will cover everything in detail. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
             )
         )
     # We use 'llm' instead of 'llm_with_tools' here.
@@ -144,11 +147,11 @@ def summarize_node(state: AgentState):
         existing_summary = state.get("summary", "")
         summarize_prompt = PromptTemplate(
             template="{system_instruction}\n\nCURRENT SUMMARY: {existing_summary}\n\nNEW TRANSCRIPT TO MERGE:\n{lean_transcript}\n\nUPDATED SUMMARY:",
-            input_variables=["messages", "existing_summary", "system_instruction"]
+            input_variables=["lean_transcript", "existing_summary", "system_instruction"]
         )
         chain = summarize_prompt | llm
         response = chain.invoke({
-            "messages": lean_transcript,
+            "lean_transcript": lean_transcript,
             "existing_summary": existing_summary,
             "system_instruction": system_instruction
         })
@@ -199,7 +202,8 @@ def chatbot_node(state: AgentState):
         "Name": state.get('lead_name'), 
         "Role": state.get('lead_role'), 
         "School Name": state.get('lead_school_name'), 
-        "Email": state.get('lead_email')
+        "Email": state.get('lead_email'),
+        "Pain Point": state.get('lead_pain_point')
     }
 
     # Dynamic Prompting/Tooling: We determine the system prompt and accessible tools based on the user's role.
@@ -313,7 +317,7 @@ app_graph = workflow.compile(checkpointer=memory_saver)
 
 def run_interactive_chat():
     # Create a unique session ID for this chat
-    thread_id = str(uuid.uuid4())
+    thread_id = "668927e5-3c88-55e1-d3de-55a0abe67d84" # str(uuid.uuid4())
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     
     print(f"--- HesedBot Testing Terminal (Thread: {thread_id})---")
