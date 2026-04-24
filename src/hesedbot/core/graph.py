@@ -108,6 +108,7 @@ def goodbye_node(state: AgentState):
             f"SYSTEM COMMAND: You are a routing assistant for Hesed Edusuite. The lead ({lead_name} from {school}) has been successfully captured in the database. "
             f"Write a simple, and highly personalized goodbye message confirming that someone from our team will be in touch shortly to discuss {school}'s needs and {pain_point}. Keep the final goodbye to a MAXIMUM of two sentences."
             "CRITICAL: If the user asks additional questions after the lead is generated, answer them briefly and naturally, but gently remind them that their dedicated account manager will cover everything in detail. Do NOT ask any more questions. Do NOT pitch any more features. End the conversation naturally."
+            f"HALLUCINATION ZERO-TOLERANCE: You must only reference current data: school {school}, lead {lead_name}, and pain point {pain_point}. Never invent or assume external examples."
             )
         )
     # We use 'llm' instead of 'llm_with_tools' here.
