@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from hesedbot.api.downloads import downloads_bp
+from hesedbot.api.middleware import require_auth_optional
 from hesedbot.core.state import AgentState
 from hesedbot.core.graph import app_graph
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -23,20 +24,35 @@ app.register_blueprint(downloads_bp, url_prefix='/downloads')
 
 
 @app.route('/chat', methods=['POST'])
+@require_auth_optional
 def chat():
-    """Endpoint to handle chat messages from the frontend."""
-    data = request.json
+    """Endpoint to handle chat messages from the frontend.
+
+    The caller's role comes exclusively from the verified Sanctum token (set by
+    `require_auth_optional`); it is never accepted from the request body.
+    """
+    data = request.get_json(silent=True) or {}
     user_message = data.get('message')
-    user_role = data.get('role', 'anonymous')  # Default to 'anonymous' if not provided
     thread_id = data.get('thread_id')  # for multi-turn conversations
 
-    if not thread_id or not user_message:
+    if not isinstance(user_message, str) or not user_message.strip():
         return jsonify({"error": "thread_id and message are required"}), 400
-    
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        return jsonify({"error": "thread_id and message are required"}), 400
+
+    # Input hardening: cap payload sizes to protect the LLM/state store.
+    if len(user_message) > 4000:
+        return jsonify({"error": "message exceeds the 4000 character limit"}), 400
+    if len(thread_id) > 128:
+        return jsonify({"error": "thread_id exceeds the 128 character limit"}), 400
+
+    user_message = user_message.strip()
+    thread_id = thread_id.strip()
+
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     
-    # Update the state with the new user message
-    input_data: AgentState = {"messages": [HumanMessage(content=user_message)], "user_role": user_role}
+    # Update the state with the new user message and the verified role.
+    input_data: AgentState = {"messages": [HumanMessage(content=user_message)], "user_role": g.user_role}
     try:
         # Use invoke() for a standard synchronous REST response. 
         final_state = app_graph.invoke(input_data, config)
@@ -72,5 +88,7 @@ def chat():
         return jsonify({"error": "An internal error occurred while processing your request."}), 500
     
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    # Never enable the Flask debugger in production.
+    debug = Config.FLASK_ENV != 'production'
+    app.run(debug=debug, port=5000, host='0.0.0.0')
     

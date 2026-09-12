@@ -10,6 +10,7 @@ from hesedbot.tools.lesson_tools import generate_lead, escalate_issue, clear_con
 from langgraph.prebuilt import ToolNode
 from hesedbot.config import Config, SALES_REPRESENTATIVE_PROMPT, PERSONAL_ASSISTANT_PROMPT
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.redis import RedisSaver
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, interrupt
 import uuid
@@ -209,7 +210,7 @@ def chatbot_node(state: AgentState):
 
     # Dynamic Prompting/Tooling: We determine the system prompt and accessible tools based on the user's role.
     if role == "anonymous":
-        data_fields = [k for k, v in required_data.items() if v]
+        data_fields = [f"{k}: {v}" for k, v in required_data.items() if v]
         system_content = SALES_REPRESENTATIVE_PROMPT.format(platform_context=platform_context, user_information=", ".join(data_fields))
         tools = [generate_lead] # Anonymous users only get the generate_lead tool to connect them to a human sales rep. No AI tools.
         llm_with_tools = llm.bind_tools(tools)
@@ -313,7 +314,35 @@ workflow.add_conditional_edges("tools_node", escalation_router, {"escalate_node"
 workflow.add_edge("escalate_node", "chatbot") # After escalation, we loop back to the chatbot node to continue the conversation with the human agent's input.
 workflow.add_edge("goodbye", END)
 
-memory_saver = MemorySaver()
+def build_checkpointer():
+    """Build the LangGraph checkpointer for the current environment.
+
+    Production persists graph state in Redis so multi-worker WSGI deployments
+    (Gunicorn) share conversation history. `RedisSaver` requires RedisJSON +
+    RediSearch (provided by the redis-stack-server image).
+
+    In production we fail fast when Redis is unreachable rather than silently
+    losing conversation state; in development we fall back to MemorySaver.
+    """
+    try:
+        saver = RedisSaver.from_conn_string(Config.REDIS_URL)
+        # Create the required RediSearch/RedisJSON indices. Guarded because
+        # index creation is idempotent but may race across Gunicorn workers.
+        try:
+            saver.setup()
+        except Exception as e:
+            print(f"[Redis Setup Warning]: {e}")
+        return saver
+    except Exception as e:
+        if Config.FLASK_ENV == 'production':
+            raise RuntimeError(
+                f"Failed to connect to Redis checkpointer at {Config.REDIS_URL}: {e}"
+            )
+        print(f"[Redis Unavailable - falling back to MemorySaver]: {e}")
+        return MemorySaver()
+
+
+memory_saver = build_checkpointer()
 app_graph = workflow.compile(checkpointer=memory_saver)
 
 def run_interactive_chat():

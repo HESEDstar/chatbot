@@ -5,12 +5,62 @@ from pathlib import Path
 load_dotenv()
 
 class Config:
+    # Flask environment. Default to 'production' so insecure dev defaults
+    # (debug mode, etc.) are never accidentally enabled on the host.
+    FLASK_ENV = os.getenv('FLASK_ENV', 'production')
+
+    # 64-char cryptographic secret used by Flask sessions/signing.
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev_key')
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') # this is deepseek API but using OpenAI client so the variable name remains OPENAI_API_KEY
     DEEPSEEK_API_URL = os.getenv('DEEPSEEK_API_URL', 'https://api.deepseek.com')
+
+    # Internal Docker bridge network endpoint for the stateful Redis container.
+    REDIS_URL = os.getenv('REDIS_URL', 'redis://redis-state:6379/0')
+
+    # Host-mounted volume for LangGraph state persistence and PDF generation.
+    PDF_STORAGE_PATH = os.getenv('PDF_STORAGE_PATH', '/app/static/pdfs')
+
+    # Main Hesed Edusuite backend endpoint used to verify Laravel Sanctum tokens.
+    HESED_VERIFY_URL = os.getenv('HESED_VERIFY_URL')
+
+    # Timeout (seconds) for the external token-verification HTTP call.
+    AUTH_TIMEOUT_SECONDS = float(os.getenv('AUTH_TIMEOUT_SECONDS', '5'))
+
     # Valid roles for RBAC
-    ROLES_PERMITTED_NOTES = ['teacher', 'admin', 'school_admin']
-    UPLOAD_FOLDER = Path.cwd() / "static" / "pdfs"
+    ROLES_PERMITTED_NOTES = ['student', 'teacher', 'admin']
+
+    # Roles allowed to download generated lesson-note PDFs.
+    ROLES_PERMITTED_DOWNLOADS = ['admin', 'teacher', 'school_admin']
+    UPLOAD_FOLDER = Path(PDF_STORAGE_PATH)
+
+
+def validate_production_secrets():
+    """Fail fast when production secrets are missing or insecure.
+
+    Called at import time so a misconfigured deployment refuses to boot instead
+    of silently serving traffic with insecure defaults.
+    """
+    if Config.FLASK_ENV != 'production':
+        return
+
+    missing = []
+    if not Config.SECRET_KEY or Config.SECRET_KEY == 'dev_key' or len(Config.SECRET_KEY) < 32:
+        missing.append('SECRET_KEY (must be a >=32 char random string)')
+    if not Config.OPENAI_API_KEY:
+        missing.append('OPENAI_API_KEY')
+    if not Config.HESED_VERIFY_URL:
+        missing.append('HESED_VERIFY_URL')
+
+    if missing:
+        raise RuntimeError(
+            'Production misconfiguration detected. Missing/invalid env vars: '
+            + ', '.join(missing)
+            + '. Refusing to start in an insecure state.'
+        )
+
+
+validate_production_secrets()
+
 
 SALES_REPRESENTATIVE_PROMPT = """
     You are a friendly, confident, and persuasive Sales Representative for Hesed Edusuite.

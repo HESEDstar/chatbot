@@ -1,0 +1,54 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hesedbot-api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      # Retained local bind mount: the deployment user owns ./data/pdfs.
+      - ./data/pdfs:/app/static/pdfs
+    depends_on:
+      redis-state:
+        condition: service_healthy
+    # Resource caps enforced by `docker compose up` (non-swarm).
+    cpus: '1.50'
+    mem_limit: 2500M
+    # Swarm-only equivalent for `docker stack deploy`.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 2500M
+
+  redis-state:
+    # redis-stack-server bundles RedisJSON + RediSearch, which the LangGraph
+    # Redis checkpointer requires (plain redis:7-alpine does NOT include them).
+    image: redis/redis-stack-server:7.4.0-v4
+    container_name: hesedbot-redis
+    restart: unless-stopped
+    environment:
+      # Extra args forwarded to redis-server (appendonly enables AOF persistence).
+      REDIS_ARGS: "--appendonly yes"
+    volumes:
+      # Docker Named Volume: the engine manages ownership inside its own
+      # protected directory, avoiding host UID/GID permission failures.
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    cpus: '0.50'
+    mem_limit: 1G
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1G
+
+volumes:
+  redis_data:

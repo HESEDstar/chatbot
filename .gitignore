@@ -7,6 +7,9 @@
 .env.local
 .env.*.local
 
+# Persistent volumes (Redis state + PDF storage) — never commit
+data/
+
 # IDE and Editor
 .vscode/
 .idea/

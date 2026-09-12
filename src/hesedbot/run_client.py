@@ -1,18 +1,20 @@
-import requests
-import uuid
+import os
 import sys
+import uuid
+
+import requests
 
 # Replace with the URL where the Flask app is running
-API_URL = "" #"http://127.0.0.1:5000/chat"
+API_URL = os.getenv('HESED_BOT_API_URL', 'http://127.0.0.1:5000/chat')
+# Optional Laravel Sanctum token for authenticated testing (sent as Bearer header)
+TOKEN = os.getenv('HESED_BOT_TOKEN', '')
 
 def run_api_client():
     # Create a unique session ID for this chat
     thread_id = str(uuid.uuid4())
-    user_role = "anonymous"  # Change to "teacher", "admin", etc., for testing RBAC
     
-    print(f"--- HesedBot API Testing Terminal ---")
+    print("--- HesedBot API Testing Terminal ---")
     print(f"Thread ID: {thread_id}")
-    print(f"User Role: {user_role}")
     print("Type 'exit' or 'quit' to stop.\n")
     
     while True:
@@ -27,15 +29,19 @@ def run_api_client():
             if not user_input.strip():
                 continue
 
-            # Construct the JSON payload for the Flask API
+            # Construct the JSON payload for the Flask API. The role is NEVER
+            # sent: the backend derives it from the Authorization header only.
             payload = {
                 "message": user_input,
-                "role": user_role,
                 "thread_id": thread_id
             }
-            
+
+            headers = {"Content-Type": "application/json"}
+            if TOKEN:
+                headers["Authorization"] = f"Bearer {TOKEN}"
+
             # Send the request to the Flask server
-            response = requests.post(API_URL, json=payload, timeout=60)
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=60)
             
             # Handle the response
             if response.status_code == 200:
