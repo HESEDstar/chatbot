@@ -33,7 +33,16 @@ def chat():
     """
     data = request.get_json(silent=True) or {}
     user_message = data.get('message')
-    thread_id = data.get('thread_id')  # for multi-turn conversations
+
+    # 1. Generate a deterministic, multi-tenant-safe thread ID for authenticated
+    #    users so chat history persists across refreshes and can never collide
+    #    with another school's conversations. `g.user_role`/`g.user_id`/
+    #    `g.school_id` are set exclusively by `require_auth_optional` (Zero-Trust).
+    if g.user_role != "anonymous" and g.user_id:
+        thread_id = f"hesedbot:{g.school_id}:{g.user_role}:{g.user_id}"
+    else:
+        # 2. Fallback to the frontend session UUID for anonymous visitors.
+        thread_id = data.get('thread_id')
 
     if not isinstance(user_message, str) or not user_message.strip():
         return jsonify({"error": "thread_id and message are required"}), 400

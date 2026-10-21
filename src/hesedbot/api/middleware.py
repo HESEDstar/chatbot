@@ -28,6 +28,7 @@ def require_auth_optional(f):
         # Defaults for unauthenticated visitors.
         g.user_role = "anonymous"
         g.user_id = None
+        g.school_id = None
 
         auth_header = request.headers.get('Authorization')
 
@@ -60,6 +61,8 @@ def require_auth_optional(f):
                 role = user_data.get("role") or data.get("role") or "anonymous"
                 g.user_role = str(role)
                 g.user_id = user_data.get("id") or data.get("id")
+                # School/tenant ID prevents cross-school state collisions.
+                g.school_id = user_data.get("school_id") or data.get("school_id")
             else:
                 return jsonify({"status": "error", "error": "Session expired or invalid."}), 401
 

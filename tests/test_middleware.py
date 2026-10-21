@@ -13,7 +13,7 @@ def auth_client():
     @app.route('/probe', methods=['GET'])
     @auth_middleware.require_auth_optional
     def probe():
-        return jsonify({"role": g.user_role, "id": g.user_id})
+        return jsonify({"role": g.user_role, "id": g.user_id, "school_id": g.school_id})
 
     app.config["TESTING"] = True
     with app.test_client() as client:
@@ -58,6 +58,30 @@ def test_middleware_flat_response_shape(monkeypatch, auth_client):
     resp = auth_client.get('/probe', headers={"Authorization": "Bearer good-token"})
     assert resp.status_code == 200
     assert resp.get_json()["role"] == "admin"
+
+
+def test_middleware_extracts_school_id(monkeypatch, auth_client):
+    """Nested 'user' object -> school_id is extracted for the tenant key."""
+    monkeypatch.setattr(
+        auth_middleware.requests, "get",
+        lambda *a, **k: FakeResponse(200, {"user": {"id": 7, "role": "teacher", "school_id": 42}}),
+    )
+    resp = auth_client.get('/probe', headers={"Authorization": "Bearer good-token"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["role"] == "teacher"
+    assert data["school_id"] == 42
+
+
+def test_middleware_school_id_flat_shape(monkeypatch, auth_client):
+    """Flat response shape -> school_id extracted via fallback."""
+    monkeypatch.setattr(
+        auth_middleware.requests, "get",
+        lambda *a, **k: FakeResponse(200, {"id": 9, "role": "admin", "school_id": 3}),
+    )
+    resp = auth_client.get('/probe', headers={"Authorization": "Bearer good-token"})
+    assert resp.status_code == 200
+    assert resp.get_json()["school_id"] == 3
 
 
 def test_middleware_invalid_token(monkeypatch, auth_client):

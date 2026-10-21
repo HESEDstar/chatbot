@@ -321,11 +321,15 @@ def build_checkpointer():
     (Gunicorn) share conversation history. `RedisSaver` requires RedisJSON +
     RediSearch (provided by the redis-stack-server image).
 
+    We construct `RedisSaver` directly (not via `from_conn_string`, which is a
+    context manager that closes the client on exit) so the connection stays
+    open for the lifetime of the worker process.
+
     In production we fail fast when Redis is unreachable rather than silently
     losing conversation state; in development we fall back to MemorySaver.
     """
     try:
-        saver = RedisSaver.from_conn_string(Config.REDIS_URL)
+        saver = RedisSaver(redis_url=Config.REDIS_URL)
         # Create the required RediSearch/RedisJSON indices. Guarded because
         # index creation is idempotent but may race across Gunicorn workers.
         try:
